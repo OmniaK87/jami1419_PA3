@@ -1,0 +1,6 @@
+Programming Assignment 3 notes
+
+Commands to server will need to follow this pattern
+    username password command
+
+
