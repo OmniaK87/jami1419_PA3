@@ -41,6 +41,10 @@ struct keyValue *hashTable;
 
 
 int main(int argc, char **argv) {
+    if (argc < 2) {
+      printf("missing argument\n");
+      exit(-1);
+    }
     char* confFile = argv[1];
 
     hashTable = NULL;

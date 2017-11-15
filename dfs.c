@@ -7,6 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/socket.h>
+#include <arpa/inet.h> //inet_addr
+#include <unistd.h>    //write
+#include <pthread.h> //for threading , link with lpthread
+#include <signal.h>
+
 #include "uthash.h"
 
 #define LINESIZE 1024
@@ -26,6 +32,7 @@ char* trimwhitespace(char*);
 void parse_dfs_config_file(struct keyValue**, char*);
 char* return_value(struct keyValue**, char*);
 void print_hash(struct keyValue **);
+void *connection_handler(void *);
 
 //Declarations
 struct keyValue *hashTable;
@@ -33,16 +40,22 @@ int socket_desc;
 
 
 int main(int argc, char **argv) {
-    char* confFile = argv[1];
+    if (argc < 3) {
+      printf("missing argument\n");
+      exit(-1);
+    }
 
     hashTable = NULL;
-    parse_dfs_config_file(&hashTable, confFile);
-    //print_hash(&hashTable);
-
-
+    parse_dfs_config_file(&hashTable, "dfs.conf");
 
     int client_sock , *new_sock;
     struct sockaddr_in server , client;
+    char* serverName = argv[1];
+    char filePath[LINESIZE];
+    getcwd(filePath, sizeof(filePath));
+    strcat(filePath, serverName);
+    printf("%s\n", filePath);
+    int port = atoi(argv[2]);
 
     //base code from http://www.binarytides.com/server-client-example-c-sockets-linux/
     //Create socket
@@ -53,18 +66,19 @@ int main(int argc, char **argv) {
     //Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(atoi(argv[2]));
+    server.sin_port = htons(port);
     //Bind
     if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
     {
         //print the error message
-        perror("bind failed. Error");
+        printf("bind failed. Error\nn");
+
         return 1;
     }
     listen(socket_desc , 3);
 
     //Accept and incoming connection
-    c = sizeof(struct sockaddr_in);
+    int c = sizeof(struct sockaddr_in);
     while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
     {
         pthread_t sniffer_thread;
@@ -85,6 +99,7 @@ int main(int argc, char **argv) {
     }
 
     close(socket_desc);
+    printf("end\n");
 }
 
 
@@ -97,8 +112,11 @@ void parse_dfs_config_file(struct keyValue **hash, char* file){
     ssize_t read;
 
     confFile = fopen(file, "r");
-    if (confFile == NULL)
+    if (confFile == NULL) {
+        printf("Unable to open the conf file.\n");
         exit(EXIT_FAILURE);
+    }
+
     while ((read = getline(&line, &len, confFile)) != -1) {
         if(line[0] != '#'){
             //printf("%s", line);
@@ -170,7 +188,23 @@ void print_hash(struct keyValue **hash) {
     }
 }
 
+/*
+ * This will handle connection for each client
+ * */
+void *connection_handler(void *socket_desc)
+{
+    //Get the socket descriptor
+    int sock = *(int*)socket_desc;
 
+    printf("Connection Recieved\n");
+
+    //Free the socket pointer
+    free(socket_desc);
+    close(sock);
+
+    printf("closed\n");
+    return 0;
+}
 
 
 
