@@ -65,6 +65,7 @@ int main(int argc, char **argv) {
                 break;
             case LIST:
                 printf("list:\n");
+
                 break;
             case GET:
                 printf("get:\n");
