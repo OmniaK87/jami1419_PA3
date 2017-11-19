@@ -12,10 +12,14 @@
 #include <unistd.h>    //write
 #include <pthread.h> //for threading , link with lpthread
 #include <signal.h>
+#include <sys/stat.h>
 
 #include "uthash.h"
 
 #define LINESIZE 1024
+#define LIST 2
+#define GET 3
+#define PUT 4
 
 //Structs
 struct keyValue {
@@ -33,10 +37,15 @@ void parse_dfs_config_file(struct keyValue**, char*);
 char* return_value(struct keyValue**, char*);
 void print_hash(struct keyValue **);
 void *connection_handler(void *);
+char* appendString(char*, char*);
+void certify_user(char**, char**, char**, char**, int*);
+int parse_command(const char*);
 
 //Declarations
-struct keyValue *hashTable;
+struct keyValue *confTable;
 int socket_desc;
+char* serverName;
+char filePath[LINESIZE];
 
 
 int main(int argc, char **argv) {
@@ -44,17 +53,18 @@ int main(int argc, char **argv) {
       printf("missing argument\n");
       exit(-1);
     }
+    serverName = argv[1];
 
-    hashTable = NULL;
-    parse_dfs_config_file(&hashTable, "dfs.conf");
+    confTable = NULL;
+    parse_dfs_config_file(&confTable, "dfs.conf");
 
     int client_sock , *new_sock;
     struct sockaddr_in server , client;
     char* serverName = argv[1];
-    char filePath[LINESIZE];
     getcwd(filePath, sizeof(filePath));
     strcat(filePath, serverName);
     printf("%s\n", filePath);
+    int result = mkdir(filePath, 0777);
     int port = atoi(argv[2]);
 
     //base code from http://www.binarytides.com/server-client-example-c-sockets-linux/
@@ -105,6 +115,14 @@ int main(int argc, char **argv) {
 
 
 //Functions
+char* appendString(char* str1, char* str2) {
+    char * str3 = (char *) malloc(1 + strlen(str1)+ strlen(str2) );
+    strcpy(str3, str1);
+    strcat(str3, str2);
+    return str3;
+}
+
+
 void parse_dfs_config_file(struct keyValue **hash, char* file){
     char * line = NULL;
     FILE *confFile;
@@ -188,6 +206,36 @@ void print_hash(struct keyValue **hash) {
     }
 }
 
+void certify_user(char** mess, char** us, char** ps, char** cmd, int* cert) {
+    char* spaceAt = strchr(*mess, ' ');
+    *spaceAt = '\0';
+    *us = *mess;
+    char* passPlus = spaceAt+1;
+    spaceAt = strchr(passPlus, ' ');
+    *spaceAt = '\0';
+    *ps = passPlus;
+    *cmd = spaceAt+1;
+    char* userConfPass = return_value(&confTable, *us);
+    if (!strcmp(userConfPass, *ps)) {
+        *cert = 1;
+    } else {
+        *cert = 0;
+    }
+}
+
+int parse_command(const char* input) {
+    //printf("|%s|\n", input);
+    if (!strcasecmp(input, "LIST")){
+        return LIST;
+    } else if (!strcasecmp(input,"GET")){
+        return GET;
+    } else if (!strcasecmp(input,"PUT")){
+        return PUT;
+    } else {
+        return -1;
+    }
+}
+
 /*
  * This will handle connection for each client
  * */
@@ -195,14 +243,86 @@ void *connection_handler(void *socket_desc)
 {
     //Get the socket descriptor
     int sock = *(int*)socket_desc;
+    int read_size, certified;
+    char *message, *user, *pass, *command, client_message[2000];
 
-    printf("Connection Recieved\n");
+    //Receive a message from client
+    while( (read_size = read(sock , client_message , LINESIZE)) > 0 ) {
+        char*  outMessage;
+        char* message = trimwhitespace(client_message);
+        printf("Client message: ");
+        printf("%s\n", message);
+
+        certify_user(&message, &user, &pass, &command, &certified);
+        if (certified) {
+            switch(parse_command(command)){
+            case LIST:;
+                outMessage = appendString(serverName, ":\n");
+                char path[LINESIZE];
+                char* userFilePath = filePath;
+                userFilePath = appendString(userFilePath, "/");
+                userFilePath = appendString(userFilePath, user);
+                printf("%s\n", userFilePath);
+
+                int result = mkdir(userFilePath, 0777);
+                printf("result of mkdir:%d\n", result);
+
+                char* listCmd = "/bin/ls ";
+                listCmd = appendString(listCmd, userFilePath);
+                listCmd = appendString(listCmd, " -a");
+
+                FILE *ls = popen(listCmd, "r");
+                if (ls != NULL) {
+                    while (fgets(path, LINESIZE, ls) != NULL) {
+                        printf("%s", path);
+                        outMessage = appendString(outMessage, path);
+                    }
+                    pclose(ls);
+                } else {
+                    printf("Unable to list directory.\n");
+                }
+
+
+
+                write(sock , outMessage, strlen(outMessage));
+
+                break;
+            case GET:
+                outMessage = appendString(serverName, ":");
+                outMessage = appendString(outMessage, "GET.");
+                write(sock , outMessage, strlen(outMessage));
+                break;
+            case PUT:
+                outMessage = appendString(serverName, ":");
+                outMessage = appendString(outMessage, "PUT.");
+                write(sock , outMessage, strlen(outMessage));
+                break;
+            default:
+                outMessage = appendString(serverName, ":");
+                outMessage = appendString(outMessage, "unknown command.");
+                write(sock , outMessage, strlen(outMessage));
+            }
+        }
+        else {
+            //Send a message back to client
+            outMessage = appendString(serverName, ":");
+            outMessage = appendString(outMessage, "Credentials not accepted.");
+            write(sock , outMessage, strlen(outMessage));
+        }
+    }
+
+    if(read_size == 0) {
+        puts("Client disconnected");
+        fflush(stdout);
+    }
+    else if(read_size == -1) {
+        perror("recv failed");
+    }
+    printf("\n");
 
     //Free the socket pointer
     free(socket_desc);
-    close(sock);
 
-    printf("closed\n");
     return 0;
 }
 
