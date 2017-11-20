@@ -14,7 +14,13 @@
 #include <signal.h>
 #include "uthash.h"
 
+#define STR_VALUE(val) #val
+#define STR(name) STR_VALUE(name)
+
+#define MAXFILESIZE 500000
 #define LINESIZE 1024
+#define PATH_LEN 256
+#define MD5_LEN 32
 #define EXIT 1
 #define LIST 2
 #define GET 3
@@ -36,16 +42,22 @@ struct keyValue *findKey(struct keyValue**, char*);
 char* trimwhitespace(char*);
 void parse_dfc_config_file(struct keyValue**, char*);
 char* return_value(struct keyValue**, char*);
-void print_hash(struct keyValue **hash);
+void print_hash(struct keyValue**, int);
 int parse_command(const char*);
-char* send_recieve_from_server(char*, char*, char*);
+char* send_recieve_from_server(char*, char*, char*, char*);
 char* appendString(char*, char* );
+void create_listTable();
+void find_available_files();
+char* send_file_to_servers(char*, char*, char*, char*);
+int CalcFileMD5(char*, char*);
+char* get_file_part(char*, char*, char*);
+
 
 //Declarations
-//
 struct keyValue *confTable;
 struct keyValue *listTable;
-
+struct keyValue *completeTable;
+char cwd[LINESIZE];
 
 
 
@@ -69,48 +81,391 @@ int main(int argc, char **argv) {
 		printf("\nEnter a command: ");
 		fgets(input, LINESIZE, stdin);
 		char* command = trimwhitespace(input);
+		char *spaceAt, *filename, *filePath;
+		FILE *fp;
 		switch(parse_command(command)){
             case EXIT:
                 loop = 0;
                 break;
 
-            case LIST:;
-                printf("list:\n");
-                char* sendMessage = return_value(&confTable, "Username");
-                sendMessage = appendString(sendMessage, " ");
-                sendMessage = appendString(sendMessage, return_value(&confTable, "Password"));
-                sendMessage = appendString(sendMessage, " ");
-                sendMessage = appendString(sendMessage, "list");
-                for (int i = 1; i <=4; i += 1){
-                    char iStr[10];
-                    sprintf(iStr, "%d", i);
-                    char* server = appendString("DFS", iStr);
-                    char* ipPort = return_value(&confTable, server);
-                    char* const colonAt = strchr(ipPort, ':');
-                    *colonAt = '\0';
-                    char* ip = ipPort;
-                    char* port = colonAt+1;
+            case LIST:
+                create_listTable();
+                find_available_files();
+                print_hash(&completeTable, 0);
+                break;
 
-                    char* response = send_recieve_from_server(ip, port, sendMessage);
-                    printf("%s\n", response);
+            case GET:;
+                spaceAt = strchr(command, ' ');
+                *spaceAt = '\0';
+                filename = spaceAt+1;
+
+                getcwd(cwd, sizeof(cwd));
+                filePath = appendString(cwd, "/");
+                filePath = appendString(filePath, filename);
+
+                create_listTable();
+                find_available_files();
+                //printf("filename:|%s|\n", filename);
+                //printf("completeTable for filename:|%s|\n", return_value(&completeTable, filename));
+                //print_hash(&completeTable, 1);
+                //print_hash(&listTable, 1);
+                if (!strcmp(return_value(&completeTable, filename), " ")) {
+                    printf("File exists complete on DFS.\n");
+                    for (int i = 1; i <=4; i += 1){
+                        char iStr[10];
+                        sprintf(iStr, "%d", i);
+                        char* partFilename = malloc(strlen(input) + 1);
+                        strcpy(partFilename, filename);
+                        partFilename = appendString(partFilename, ".");
+                        partFilename = appendString(partFilename, iStr);
+                        //find what server to ask
+                        char* server = return_value(&listTable, partFilename);
+                        partFilename = appendString(".", partFilename);
+                        //printf("filename:%s\n", filename);
+                        //printf("server:%s filepart:%s\n", server, partFilename);
+
+                        //get ip and port of wanted server
+                        char* ipPort = return_value(&confTable, server);
+                        char* const colonAt = strchr(ipPort, ':');
+                        *colonAt = '\0';
+                        char* ip = ipPort;
+                        char* port = colonAt+1;
+
+                        char* part = get_file_part(ip, port, partFilename);
+
+
+
+                        fp = fopen(filePath, "wb+");
+                        if (fp != NULL) {
+                            fwrite(part, strlen(part), 1, fp);
+                        }
+                        fclose(fp);
+                    }
+
+
+                } else {
+                    printf("File incomplete or missing in DFS.\n");
                 }
+
                 break;
 
-            case GET:
-                printf("get:\n");
+            case PUT:;
+                spaceAt = strchr(command, ' ');
+                *spaceAt = '\0';
+                filename = spaceAt+1;
+
+                getcwd(cwd, sizeof(cwd));
+                filePath = appendString(cwd, "/");
+                filePath = appendString(filePath, filename);
+                //printf("%s\n", filePath);
+                //test if file exists
+                if ((fp = fopen(trimwhitespace(filePath), "rb"))) {
+                    //calc file
+                    int md5num;
+                    char md5[MD5_LEN + 1];
+                    if (!CalcFileMD5(filePath, md5)) {
+                        puts("Error occured!");
+                    } else {
+                        //printf("Success! MD5 sum is: %s\n", md5);
+                        md5num = (md5[(strlen(md5)-1)] - '0')%4;
+                        //printf("Success! MD5 sum %% 4 is: %d\n", md5num);
+                    }
+
+                    //split file
+                    char* splitCmd = "split ";
+                    splitCmd = appendString(splitCmd, " -n 4 -d ");
+                    splitCmd = appendString(splitCmd, filePath);
+                    popen(splitCmd, "r");
+
+                    for (int i = 1; i <=4; i += 1){
+                        char iStr[10];
+                        sprintf(iStr, "%d", i);
+                        char* server = appendString("DFS", iStr);
+                        char* ipPort = return_value(&confTable, server);
+                        char* const colonAt = strchr(ipPort, ':');
+                        *colonAt = '\0';
+                        char* ip = ipPort;
+                        char* port = colonAt+1;
+
+                        int pairNum = i - md5num;
+                        if (pairNum < 1) pairNum += 4;
+                        char *part1, *part2, *path1, *path2;
+                        switch(pairNum) {
+                        case 1:
+                            part1 = ".1";
+                            part2 = ".2";
+                            path1 = "0";
+                            path2 = "1";
+                            break;
+                        case 2:
+                            part1 = ".2";
+                            part2 = ".3";
+                            path1 = "1";
+                            path2 = "2";
+                            break;
+
+                        case 3:
+                            part1 = ".3";
+                            part2 = ".4";
+                            path1 = "2";
+                            path2 = "3";
+                            break;
+
+                        case 4:
+                            part1 = ".4";
+                            part2 = ".1";
+                            path1 = "3";
+                            path2 = "0";
+                            break;
+                        }
+
+
+                        char* partPath = appendString(cwd, "/x0");
+                        partPath = appendString(partPath, path1);
+                        char* response = send_file_to_servers(ip, port, partPath, appendString(filename, part1));
+                        char errorChar = *response;
+                        if (errorChar =='~'){
+                            response = response + 1;
+                            printf("%s\n", response);
+                        }
+                        partPath = appendString(cwd, "/x0");
+                        partPath = appendString(partPath, path2);
+                        response = send_file_to_servers(ip, port, partPath, appendString(filename, part2));
+                        errorChar = *response;
+                        if (errorChar =='~'){
+                            response = response + 1;
+                            printf("%s\n", response);
+                        }
+                    }
+                    fclose(fp);
+
+                } else {
+                    printf("File does not exist.\n");
+                }
+
                 break;
 
-            case PUT:
-                printf("put:\n");
-                break;
-
-            case -1:
+            default:
                 printf("unknown command, please try again\n");
                 break;
 		}
 	}
 	printf("goodbye\n");
 }
+
+
+
+char* get_file_part(char* ip, char* port, char* filename) {
+    int sock;
+    struct sockaddr_in server;
+    sock = socket(AF_INET , SOCK_STREAM , 0);
+    if (sock == -1) {
+        //printf("Could not create socket");
+        return "~Could not create socket";
+    }
+    server.sin_addr.s_addr = inet_addr(ip);
+    server.sin_family = AF_INET;
+    server.sin_port = htons( atoi(port) );
+
+    //Connect to remote server
+    if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0) {
+        //printf("connect failed. Error\n");
+        char* errorMessage = "connection failed.";
+        return errorMessage;
+    }
+    char* sendMessage = return_value(&confTable, "Username");
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, return_value(&confTable, "Password"));
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, "get ");
+    sendMessage = appendString(sendMessage, trimwhitespace(filename));
+    sendMessage = appendString(sendMessage, " ");
+    write(sock , sendMessage , strlen(sendMessage));
+
+    char serverReply[MAXFILESIZE];
+    //Receive a reply from the server
+    bzero(serverReply, sizeof(serverReply));
+    read(sock , serverReply, MAXFILESIZE);
+
+    getcwd(cwd, sizeof(cwd));
+    char* filenamePath = appendString(cwd, "/");
+    filenamePath = appendString(filenamePath, filename);
+    printf("%s\n", filenamePath);
+
+    /*FILE *fp;
+    fp = fopen(filename, "wb+");
+    if (fp != NULL) {
+        fwrite(serverReply, strlen(serverReply), 1, fp);
+    }
+    fclose(fp);*/
+
+    //printf("serverReply:%s\n", serverReply);
+
+    close(sock);
+    char* serverReplyStr = serverReply;
+    return serverReplyStr;
+}
+
+
+char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename) {
+    int sock;
+    struct sockaddr_in server;
+    sock = socket(AF_INET , SOCK_STREAM , 0);
+    if (sock == -1) {
+        //printf("Could not create socket");
+        return "~Could not create socket";
+    }
+    server.sin_addr.s_addr = inet_addr(ip);
+    server.sin_family = AF_INET;
+    server.sin_port = htons( atoi(port) );
+
+    //Connect to remote server
+    if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0) {
+        //printf("connect failed. Error\n");
+        char* errorMessage = "connection failed.";
+        return errorMessage;
+    }
+
+    //printf("filename:|%s|\n", filename);
+    char* sendMessage = return_value(&confTable, "Username");
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, return_value(&confTable, "Password"));
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, "put .");
+    sendMessage = appendString(sendMessage, trimwhitespace(filename));
+    sendMessage = appendString(sendMessage, " ");
+    write(sock , sendMessage , strlen(sendMessage));
+
+    FILE *fp;
+    if ((fp = fopen(filePath, "rb"))){
+        char * line = NULL;
+        size_t len = 0;
+
+        char buffer[LINESIZE];
+        size_t read;
+        while ((read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+            write(sock, buffer, (int)read);
+        }
+
+        fclose(fp);
+    } else { //file was not able to be opened
+        printf("unable to open:%s.\n", filename);
+    }
+
+    close(sock);
+    return "file sent.";
+}
+
+//from https://stackoverflow.com/questions/3395690/md5sum-of-file-in-linux-c
+int CalcFileMD5(char *file_name, char *md5_sum)
+{
+    #define MD5SUM_CMD_FMT "md5sum %." STR(PATH_LEN) "s 2>/dev/null"
+    char cmd[PATH_LEN + sizeof (MD5SUM_CMD_FMT)];
+    sprintf(cmd, MD5SUM_CMD_FMT, file_name);
+    #undef MD5SUM_CMD_FMT
+
+    FILE *p = popen(cmd, "r");
+    if (p == NULL) return 0;
+
+    int i, ch;
+    for (i = 0; i < MD5_LEN && isxdigit(ch = fgetc(p)); i++) {
+        *md5_sum++ = ch;
+    }
+
+    *md5_sum = '\0';
+    pclose(p);
+    return i == MD5_LEN;
+}
+
+
+
+void find_available_files() {
+    completeTable = NULL;
+    struct keyValue *s;
+    for(s=listTable; s != NULL; s = s->hh.next) {
+        //printf("key: %s, value: %s\n", s->key, s->value);
+        char *key = malloc(strlen(s->key) + 1);
+        strcpy(key, s->key);
+        char * const lastPeriod = strrchr(key, '.');
+        *lastPeriod = '\0';
+        char* number = lastPeriod+1;
+
+        //if key does not exist in completeTable
+        if (strcmp(return_value(&completeTable, key), "")) {
+            free(key);
+        } else {
+            int one = 0, two = 0, three = 0, four = 0;
+            //check for all numbers
+            char* filenamePart = appendString(key, ".");
+            if (return_value(&listTable, appendString(filenamePart, "1")) != "")
+                one = 1;
+            if (return_value(&listTable, appendString(filenamePart, "2")) != "")
+                two = 1;
+            if (return_value(&listTable, appendString(filenamePart, "3")) != "")
+                three = 1;
+            if (return_value(&listTable, appendString(filenamePart, "4")) != "")
+                four = 1;
+            if (one && two && three && four) {
+                add_key_value(&completeTable, key, " ");
+            } else {
+                add_key_value(&completeTable, key, " [incomplete]");
+            }
+        }
+    }
+}
+
+
+void create_listTable(){
+    listTable = NULL;
+    char* sendMessage = return_value(&confTable, "Username");
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, return_value(&confTable, "Password"));
+    sendMessage = appendString(sendMessage, " ");
+    sendMessage = appendString(sendMessage, "list");
+    for (int i = 1; i <=4; i += 1){
+        char iStr[10];
+        sprintf(iStr, "%d", i);
+        char* server = appendString("DFS", iStr);
+        char* ipPort = return_value(&confTable, server);
+        char* const colonAt = strchr(ipPort, ':');
+        *colonAt = '\0';
+        char* ip = ipPort;
+        char* port = colonAt+1;
+
+        char* response = send_recieve_from_server(server, ip, port, sendMessage);
+        char errorChar = *response;
+
+        if (errorChar !='~'){
+            //printf("|%s|\n", response);
+            size_t len = 0;
+            FILE *responseStream;
+            char *responseLine;
+            ssize_t read;
+            char responseBuffer[LINESIZE];
+            strcpy(responseBuffer, response);
+            responseStream = fmemopen(responseBuffer, strlen(responseBuffer), "r");
+
+            //Get serverName
+            getline(&responseLine, &len, responseStream);
+            char serverNameBuffer[20];
+            strcpy(serverNameBuffer, trimwhitespace(responseLine));
+            //remove leading / and trailing :
+            char* serverName = serverNameBuffer;
+            serverName = serverName+1;
+            serverName[strlen(serverName)-1] = '\0';
+            while ((read = getline(&responseLine, &len, responseStream)) != -1){
+                add_key_value(&listTable, trimwhitespace(responseLine+1), serverName);
+                //printf("Got %s", responseLine);
+                bzero(responseLine, sizeof(responseLine));
+            }
+        } else {
+            response = response + 1;
+            printf("%s\n", response);
+        }
+    }
+    //print_hash(&listTable);
+}
+
 
 char* appendString(char* str1, char* str2) {
     char * str3 = (char *) malloc(1 + strlen(str1)+ strlen(str2) );
@@ -120,13 +475,13 @@ char* appendString(char* str1, char* str2) {
 }
 
 
-char* send_recieve_from_server(char* ip, char* port, char* message) {
+char* send_recieve_from_server(char* serverName, char* ip, char* port, char* message) {
     int sock;
     struct sockaddr_in server;
     sock = socket(AF_INET , SOCK_STREAM , 0);
     if (sock == -1) {
         //printf("Could not create socket");
-        return "Could not create socket";
+        return "~Could not create socket";
     }
     server.sin_addr.s_addr = inet_addr(ip);
     server.sin_family = AF_INET;
@@ -136,15 +491,13 @@ char* send_recieve_from_server(char* ip, char* port, char* message) {
     if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0) {
         //printf("connect failed. Error\n");
         char* errorMessage = "connect to ";
-        errorMessage = appendString(errorMessage, ip);
-        errorMessage = appendString(errorMessage, ":");
-        errorMessage = appendString(errorMessage, port);
+        errorMessage = appendString(errorMessage, serverName);
         errorMessage = appendString(errorMessage, " failed.");
         return errorMessage;
     }
     if( write(sock , message , strlen(message)) < 0) {
         //printf("Send failed\n");
-        return "Send failed";
+        return "~Send failed";
     }
     char serverReply[LINESIZE];
     //Receive a reply from the server
@@ -158,16 +511,20 @@ char* send_recieve_from_server(char* ip, char* port, char* message) {
 }
 
 
-//Functions
 int parse_command(const char* input) {
     //printf("|%s|\n", input);
-    if (!strcasecmp(input, "EXIT")){
+    char * copy = malloc(strlen(input) + 1);
+    strcpy(copy, input);
+    if (strcmp(input, "")) {
+        copy = strtok(copy, " ");
+    }
+    if (!strcasecmp(copy, "EXIT")){
         return EXIT;
-    } else if (!strcasecmp(input,"LIST")){
+    } else if (!strcasecmp(copy,"LIST")){
         return LIST;
-    } else if (!strcasecmp(input,"GET")){
+    } else if (!strcasecmp(copy,"GET")){
         return GET;
-    } else if (!strcasecmp(input,"PUT")){
+    } else if (!strcasecmp(copy,"PUT")){
         return PUT;
     } else {
         return -1;
@@ -213,6 +570,11 @@ void parse_dfc_config_file(struct keyValue **hash, char* file){
 
 
 void add_key_value(struct keyValue **hash, char* keyIn, char* valueIn) {
+    struct keyValue *f = findKey(hash, keyIn);
+    if (f != NULL) {
+        HASH_DEL(*hash, f);
+        free(f);
+    }
     struct keyValue *s;
     HASH_FIND_INT(*hash, &keyIn, s);  //id already in the hash?
     if (s==NULL) {
@@ -258,9 +620,13 @@ char* return_value(struct keyValue **hash, char* key) {
     }
 }
 
-void print_hash(struct keyValue **hash) {
+void print_hash(struct keyValue **hash, int showKeyValue) {
     struct keyValue *s;
     for(s=*hash; s != NULL; s = s->hh.next) {
-        printf("key: %s, value: %s\n", s->key, s->value);
+        if (showKeyValue) {
+            printf("key: |%s|, value: |%s|\n", s->key, s->value);
+        } else {
+            printf("%s %s\n", s->key, s->value);
+        }
     }
 }

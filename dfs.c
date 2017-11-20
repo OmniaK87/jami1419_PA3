@@ -157,7 +157,9 @@ void parse_dfs_config_file(struct keyValue **hash, char* file){
 char* return_value(struct keyValue **hash, char* key) {
     struct keyValue *f = findKey(hash, key);
     if (f != NULL) {
-        return f->value;
+        char * copy = malloc(strlen(f->value) + 1);
+        strcpy(copy, f->value);
+        return copy;
     } else {
         return "";
     }
@@ -165,6 +167,11 @@ char* return_value(struct keyValue **hash, char* key) {
 
 
 void add_key_value(struct keyValue **hash, char* keyIn, char* valueIn) {
+    struct keyValue *f = findKey(hash, keyIn);
+    if (f != NULL) {
+        HASH_DEL(*hash, f);
+        free(f);
+    }
     struct keyValue *s;
     HASH_FIND_INT(*hash, &keyIn, s);  //id already in the hash?
     if (s==NULL) {
@@ -225,11 +232,14 @@ void certify_user(char** mess, char** us, char** ps, char** cmd, int* cert) {
 
 int parse_command(const char* input) {
     //printf("|%s|\n", input);
-    if (!strcasecmp(input, "LIST")){
+    char * copy = malloc(strlen(input) + 1);
+    strcpy(copy, input);
+    copy = strtok(copy, " ");
+    if (!strcasecmp(copy, "LIST")){
         return LIST;
-    } else if (!strcasecmp(input,"GET")){
+    } else if (!strcasecmp(copy,"GET")){
         return GET;
-    } else if (!strcasecmp(input,"PUT")){
+    } else if (!strcasecmp(copy,"PUT")){
         return PUT;
     } else {
         return -1;
@@ -241,6 +251,7 @@ int parse_command(const char* input) {
  * */
 void *connection_handler(void *socket_desc)
 {
+    int result = mkdir(filePath, 0777);
     //Get the socket descriptor
     int sock = *(int*)socket_desc;
     int read_size, certified;
@@ -250,52 +261,101 @@ void *connection_handler(void *socket_desc)
     while( (read_size = read(sock , client_message , LINESIZE)) > 0 ) {
         char*  outMessage;
         char* message = trimwhitespace(client_message);
+        FILE *fp;
         printf("Client message: ");
         printf("%s\n", message);
 
         certify_user(&message, &user, &pass, &command, &certified);
         if (certified) {
+            char* userFilePath = filePath;
+            userFilePath = appendString(userFilePath, "/");
+            userFilePath = appendString(userFilePath, user);
+            char *filename, *spaceAt, *filenamePath;
             switch(parse_command(command)){
             case LIST:;
                 outMessage = appendString(serverName, ":\n");
                 char path[LINESIZE];
-                char* userFilePath = filePath;
-                userFilePath = appendString(userFilePath, "/");
-                userFilePath = appendString(userFilePath, user);
-                printf("%s\n", userFilePath);
 
+                //make sure the user's directory exists
                 int result = mkdir(userFilePath, 0777);
-                printf("result of mkdir:%d\n", result);
 
                 char* listCmd = "/bin/ls ";
                 listCmd = appendString(listCmd, userFilePath);
                 listCmd = appendString(listCmd, " -a");
+                //printf("listCmd:%s\n", listCmd);
 
                 FILE *ls = popen(listCmd, "r");
                 if (ls != NULL) {
                     while (fgets(path, LINESIZE, ls) != NULL) {
-                        printf("%s", path);
-                        outMessage = appendString(outMessage, path);
+                        //printf("%s", path);
+                        if (strcmp(trimwhitespace(path), ".") && strcmp(trimwhitespace(path), "..")) {
+                            outMessage = appendString(outMessage, path);
+                            outMessage = appendString(outMessage, "\n");
+                        }
                     }
                     pclose(ls);
                 } else {
                     printf("Unable to list directory.\n");
+                    outMessage = appendString(outMessage, "Unable to list directory.");
                 }
 
-
-
+                outMessage = trimwhitespace(outMessage);
                 write(sock , outMessage, strlen(outMessage));
+                printf("Response:\n%s\n", outMessage);
 
                 break;
             case GET:
-                outMessage = appendString(serverName, ":");
-                outMessage = appendString(outMessage, "GET.");
+                outMessage = appendString(serverName, ":\n");
+
+                spaceAt = strchr(command, ' ');
+                *spaceAt = '\0';
+                filename = spaceAt+1;
+                filenamePath = userFilePath;
+                filenamePath = appendString(filenamePath, "/");
+                filenamePath = appendString(filenamePath, filename);
+                printf("filename: %s\n", filename);
+                printf("filenamePath: %s\n", filenamePath);
+
+                if ((fp = fopen(filenamePath, "rb"))){
+                    char * line = NULL;
+                    size_t len = 0;
+
+                    char buffer[LINESIZE];
+                    size_t read;
+                    while ((read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+                        write(sock, buffer, (int)read);
+                    }
+
+                    fclose(fp);
+                } else { //file was not able to be opened
+                    printf("unable to open:%s.\n", filename);
+                }
+
+
+                outMessage = trimwhitespace(outMessage);
                 write(sock , outMessage, strlen(outMessage));
+                printf("Response:\n%s\n", outMessage);
                 break;
-            case PUT:
-                outMessage = appendString(serverName, ":");
-                outMessage = appendString(outMessage, "PUT.");
-                write(sock , outMessage, strlen(outMessage));
+            case PUT:;
+                spaceAt = strchr(command, ' ');
+                *spaceAt = '\0';
+                char* filenamePlus = spaceAt+1;
+                spaceAt = strchr(filenamePlus, ' ');
+                *spaceAt = '\0';
+                filename = filenamePlus;
+                char* file = spaceAt+1;
+                filenamePath = userFilePath;
+                filenamePath = appendString(filenamePath, "/");
+                filenamePath = appendString(filenamePath, filename);
+
+                FILE *fp;
+                fp = fopen(filenamePath, "wb+");
+                if (fp != NULL) {
+                    fwrite(file, strlen(file), 1, fp);
+                }
+                fclose(fp);
+                printf("Saved file to:%s\n", filenamePath);
+
                 break;
             default:
                 outMessage = appendString(serverName, ":");
@@ -306,7 +366,7 @@ void *connection_handler(void *socket_desc)
         else {
             //Send a message back to client
             outMessage = appendString(serverName, ":");
-            outMessage = appendString(outMessage, "Credentials not accepted.");
+            outMessage = appendString(outMessage, "Invalid Username/Password. Please try again.");
             write(sock , outMessage, strlen(outMessage));
         }
     }
