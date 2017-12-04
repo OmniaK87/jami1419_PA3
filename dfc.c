@@ -58,6 +58,8 @@ struct keyValue *confTable;
 struct keyValue *listTable;
 struct keyValue *completeTable;
 char cwd[LINESIZE];
+//hack solution to fix extra character
+int first = 1;
 
 
 
@@ -74,6 +76,7 @@ int main(int argc, char **argv) {
     printf("Welcome: %s\n", return_value(&confTable, "Username"));
 
     char input[LINESIZE];
+
 
 	int loop = 1;
 	while(loop){
@@ -133,9 +136,15 @@ int main(int argc, char **argv) {
 
                         char* part = get_file_part(ip, port, partFilename);
 
+                        printf("filepart: |%s|\n", part);
 
 
-                        fp = fopen(filePath, "wb+");
+                        if (i == 1) {
+                            fp = fopen(filePath, "wb+");
+                        } else {
+                            fp = fopen(filePath, "ab+");
+                        }
+
                         if (fp != NULL) {
                             fwrite(part, strlen(part), 1, fp);
                         }
@@ -175,7 +184,9 @@ int main(int argc, char **argv) {
                     char* splitCmd = "split ";
                     splitCmd = appendString(splitCmd, " -n 4 -d ");
                     splitCmd = appendString(splitCmd, filePath);
-                    popen(splitCmd, "r");
+                    printf("split command: %s\n", splitCmd);
+                    FILE *split = popen(splitCmd, "r");
+                    pclose(split);
 
                     for (int i = 1; i <=4; i += 1){
                         char iStr[10];
@@ -228,9 +239,9 @@ int main(int argc, char **argv) {
                             response = response + 1;
                             printf("%s\n", response);
                         }
-                        partPath = appendString(cwd, "/x0");
-                        partPath = appendString(partPath, path2);
-                        response = send_file_to_servers(ip, port, partPath, appendString(filename, part2));
+                        char* partPath2 = appendString(cwd, "/x0");
+                        partPath2 = appendString(partPath2, path2);
+                        response = send_file_to_servers(ip, port, partPath2, appendString(filename, part2));
                         errorChar = *response;
                         if (errorChar =='~'){
                             response = response + 1;
@@ -308,6 +319,7 @@ char* get_file_part(char* ip, char* port, char* filename) {
 
 
 char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename) {
+    printf("in send_file_to_servers, filename:%s going to: %s\n", filename, port);
     int sock;
     struct sockaddr_in server;
     sock = socket(AF_INET , SOCK_STREAM , 0);
@@ -334,18 +346,43 @@ char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename)
     sendMessage = appendString(sendMessage, "put .");
     sendMessage = appendString(sendMessage, trimwhitespace(filename));
     sendMessage = appendString(sendMessage, " ");
-    write(sock , sendMessage , strlen(sendMessage));
+    //write(sock , sendMessage , strlen(sendMessage));
 
+    //printf("About to open file\n");
+    if (first) {
+        FILE *fFirst;
+        fFirst = fopen(filePath, "rb");
+        char buffer[LINESIZE];
+        size_t read;
+        while ((read = fread(buffer, 1, sizeof(buffer), fFirst)) > 0) {
+            //printf("first buffer|%s|\n",buffer);
+            //write(sock, buffer, (int)read);
+
+            bzero(buffer, sizeof(buffer));
+
+        }
+
+        fclose(fFirst);
+        first = 0;
+    }
     FILE *fp;
     if ((fp = fopen(filePath, "rb"))){
-        char * line = NULL;
-        size_t len = 0;
+        printf("Filepath:%s\n", filePath);
+        //printf("in if\n");
 
         char buffer[LINESIZE];
         size_t read;
         while ((read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-            write(sock, buffer, (int)read);
+            //printf("buffer|%s|\n",buffer);
+            //write(sock, buffer, (int)read);
+            sendMessage = appendString(sendMessage, buffer);
+
+            bzero(buffer, sizeof(buffer));
+
         }
+
+        write(sock , sendMessage , strlen(sendMessage));
+        printf("sent: |%s|\n", sendMessage);
 
         fclose(fp);
     } else { //file was not able to be opened

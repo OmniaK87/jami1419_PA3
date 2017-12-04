@@ -214,6 +214,7 @@ void print_hash(struct keyValue **hash) {
 }
 
 void certify_user(char** mess, char** us, char** ps, char** cmd, int* cert) {
+    printf("mess:|%s|\n", *mess);
     char* spaceAt = strchr(*mess, ' ');
     *spaceAt = '\0';
     *us = *mess;
@@ -260,10 +261,11 @@ void *connection_handler(void *socket_desc)
     //Receive a message from client
     while( (read_size = read(sock , client_message , LINESIZE)) > 0 ) {
         char*  outMessage;
-        char* message = trimwhitespace(client_message);
+        //char* message = trimwhitespace(client_message);
+        char* message = client_message;
         FILE *fp;
-        printf("Client message: ");
-        printf("%s\n", message);
+        printf("%s Client message: ", serverName);
+        printf("%s %s\n", serverName, message);
 
         certify_user(&message, &user, &pass, &command, &certified);
         if (certified) {
@@ -271,6 +273,7 @@ void *connection_handler(void *socket_desc)
             userFilePath = appendString(userFilePath, "/");
             userFilePath = appendString(userFilePath, user);
             char *filename, *spaceAt, *filenamePath;
+            printf("precommand:|%s|\n", command);
             switch(parse_command(command)){
             case LIST:;
                 outMessage = appendString(serverName, ":\n");
@@ -304,8 +307,10 @@ void *connection_handler(void *socket_desc)
                 printf("Response:\n%s\n", outMessage);
 
                 break;
-            case GET:
-                outMessage = appendString(serverName, ":\n");
+            case GET:;
+                //outMessage = appendString(serverName, ":\n");
+                char* filePart = "";
+                command = trimwhitespace(command);
 
                 spaceAt = strchr(command, ' ');
                 *spaceAt = '\0';
@@ -322,9 +327,15 @@ void *connection_handler(void *socket_desc)
 
                     char buffer[LINESIZE];
                     size_t read;
+                    char* filePart = "";
                     while ((read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-                        write(sock, buffer, (int)read);
+                        filePart = appendString(filePart, buffer);
+                        //bzero(buffer, sizeof(buffer));
                     }
+                    //write(sock, filePart, strlen(filePart));
+
+                    write(sock , filePart, strlen(filePart));
+                    printf("Response:\n%s\n", filePart);
 
                     fclose(fp);
                 } else { //file was not able to be opened
@@ -332,29 +343,46 @@ void *connection_handler(void *socket_desc)
                 }
 
 
-                outMessage = trimwhitespace(outMessage);
-                write(sock , outMessage, strlen(outMessage));
-                printf("Response:\n%s\n", outMessage);
+                //outMessage = trimwhitespace(file);
+
                 break;
             case PUT:;
+                printf("%s PUT1\n", serverName);
+                printf("command:|%s|\n", command);
                 spaceAt = strchr(command, ' ');
                 *spaceAt = '\0';
                 char* filenamePlus = spaceAt+1;
+                printf("%s filenamePlus:|%s|\n", serverName, filenamePlus);
+
+
                 spaceAt = strchr(filenamePlus, ' ');
+                if (!spaceAt) {
+                    printf("No file was sent\n");
+                    break;
+                }
                 *spaceAt = '\0';
                 filename = filenamePlus;
+                printf("%s filename:%s\n", serverName, filename);
+                printf("%s PUT2\n", serverName);
                 char* file = spaceAt+1;
+                printf("file:|%s|\n", file);
                 filenamePath = userFilePath;
                 filenamePath = appendString(filenamePath, "/");
                 filenamePath = appendString(filenamePath, filename);
+                printf("%s PUT3\n", serverName);
+
+                printf("%s\n", file);
 
                 FILE *fp;
                 fp = fopen(filenamePath, "wb+");
                 if (fp != NULL) {
                     fwrite(file, strlen(file), 1, fp);
+                } else {
+                    printf("%s Unable to write to file: %s\n", serverName, filenamePath);
                 }
                 fclose(fp);
-                printf("Saved file to:%s\n", filenamePath);
+                printf("%s Saved file to:%s\n", serverName, filenamePath);
+                printf("%s PUT4\n", serverName);
 
                 break;
             default:
@@ -372,11 +400,11 @@ void *connection_handler(void *socket_desc)
     }
 
     if(read_size == 0) {
-        puts("Client disconnected");
+        printf("%s Client disconnected", serverName);
         fflush(stdout);
     }
     else if(read_size == -1) {
-        perror("recv failed");
+        printf("%s recv failed", serverName);
     }
     printf("\n");
 
