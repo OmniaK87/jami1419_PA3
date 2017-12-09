@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
     char* serverName = argv[1];
     getcwd(filePath, sizeof(filePath));
     strcat(filePath, serverName);
-    printf("%s\n", filePath);
+    //printf("%s\n", filePath);
     int result = mkdir(filePath, 0777);
     int port = atoi(argv[2]);
 
@@ -214,7 +214,7 @@ void print_hash(struct keyValue **hash) {
 }
 
 void certify_user(char** mess, char** us, char** ps, char** cmd, int* cert) {
-    printf("mess:|%s|\n", *mess);
+    //printf("mess:|%s|\n", *mess);
     char* spaceAt = strchr(*mess, ' ');
     *spaceAt = '\0';
     *us = *mess;
@@ -273,7 +273,7 @@ void *connection_handler(void *socket_desc)
             userFilePath = appendString(userFilePath, "/");
             userFilePath = appendString(userFilePath, user);
             char *filename, *spaceAt, *filenamePath;
-            printf("precommand:|%s|\n", command);
+            //printf("precommand:|%s|\n", command);
             switch(parse_command(command)){
             case LIST:;
                 outMessage = appendString(serverName, ":\n");
@@ -304,7 +304,7 @@ void *connection_handler(void *socket_desc)
 
                 outMessage = trimwhitespace(outMessage);
                 write(sock , outMessage, strlen(outMessage));
-                printf("Response:\n%s\n", outMessage);
+                printf("%s Response:\n%s\n", serverName, outMessage);
 
                 break;
             case GET:;
@@ -318,8 +318,8 @@ void *connection_handler(void *socket_desc)
                 filenamePath = userFilePath;
                 filenamePath = appendString(filenamePath, "/");
                 filenamePath = appendString(filenamePath, filename);
-                printf("filename: %s\n", filename);
-                printf("filenamePath: %s\n", filenamePath);
+                //printf("filename: %s\n", filename);
+                //printf("filenamePath: %s\n", filenamePath);
 
                 if ((fp = fopen(filenamePath, "rb"))){
                     char * line = NULL;
@@ -332,14 +332,13 @@ void *connection_handler(void *socket_desc)
                         filePart = appendString(filePart, buffer);
                         //bzero(buffer, sizeof(buffer));
                     }
-                    //write(sock, filePart, strlen(filePart));
 
                     write(sock , filePart, strlen(filePart));
-                    printf("Response:\n%s\n", filePart);
+                    printf("%s Response:\n%s\n", serverName, filePart);
 
                     fclose(fp);
                 } else { //file was not able to be opened
-                    printf("unable to open:%s.\n", filename);
+                    printf("%s unable to open:%s.\n", serverName, filename);
                 }
 
 
@@ -347,12 +346,12 @@ void *connection_handler(void *socket_desc)
 
                 break;
             case PUT:;
-                printf("%s PUT1\n", serverName);
-                printf("command:|%s|\n", command);
+                //printf("%s PUT1\n", serverName);
+                //printf("command:|%s|\n", command);
                 spaceAt = strchr(command, ' ');
                 *spaceAt = '\0';
                 char* filenamePlus = spaceAt+1;
-                printf("%s filenamePlus:|%s|\n", serverName, filenamePlus);
+                //printf("%s filenamePlus:|%s|\n", serverName, filenamePlus);
 
 
                 spaceAt = strchr(filenamePlus, ' ');
@@ -362,16 +361,16 @@ void *connection_handler(void *socket_desc)
                 }
                 *spaceAt = '\0';
                 filename = filenamePlus;
-                printf("%s filename:%s\n", serverName, filename);
-                printf("%s PUT2\n", serverName);
+                //printf("%s filename:%s\n", serverName, filename);
+                //printf("%s PUT2\n", serverName);
                 char* file = spaceAt+1;
-                printf("file:|%s|\n", file);
+                //printf("file:|%s|\n", file);
                 filenamePath = userFilePath;
                 filenamePath = appendString(filenamePath, "/");
                 filenamePath = appendString(filenamePath, filename);
-                printf("%s PUT3\n", serverName);
+                //printf("%s PUT3\n", serverName);
 
-                printf("%s\n", file);
+                //printf("%s\n", file);
 
                 FILE *fp;
                 fp = fopen(filenamePath, "wb+");
@@ -382,7 +381,7 @@ void *connection_handler(void *socket_desc)
                 }
                 fclose(fp);
                 printf("%s Saved file to:%s\n", serverName, filenamePath);
-                printf("%s PUT4\n", serverName);
+                //printf("%s PUT4\n", serverName);
 
                 break;
             default:

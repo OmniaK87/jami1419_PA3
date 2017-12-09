@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
 
                         char* part = get_file_part(ip, port, partFilename);
 
-                        printf("filepart: |%s|\n", part);
+                        //printf("filepart: |%s|\n", part);
 
 
                         if (i == 1) {
@@ -184,7 +184,7 @@ int main(int argc, char **argv) {
                     char* splitCmd = "split ";
                     splitCmd = appendString(splitCmd, " -n 4 -d ");
                     splitCmd = appendString(splitCmd, filePath);
-                    printf("split command: %s\n", splitCmd);
+                    //printf("split command: %s\n", splitCmd);
                     FILE *split = popen(splitCmd, "r");
                     pclose(split);
 
@@ -301,7 +301,7 @@ char* get_file_part(char* ip, char* port, char* filename) {
     getcwd(cwd, sizeof(cwd));
     char* filenamePath = appendString(cwd, "/");
     filenamePath = appendString(filenamePath, filename);
-    printf("%s\n", filenamePath);
+    //printf("%s\n", filenamePath);
 
     /*FILE *fp;
     fp = fopen(filename, "wb+");
@@ -319,7 +319,7 @@ char* get_file_part(char* ip, char* port, char* filename) {
 
 
 char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename) {
-    printf("in send_file_to_servers, filename:%s going to: %s\n", filename, port);
+    //printf("in send_file_to_servers, filename:%s going to: %s\n", filename, port);
     int sock;
     struct sockaddr_in server;
     sock = socket(AF_INET , SOCK_STREAM , 0);
@@ -367,7 +367,7 @@ char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename)
     }
     FILE *fp;
     if ((fp = fopen(filePath, "rb"))){
-        printf("Filepath:%s\n", filePath);
+        //printf("Filepath:%s\n", filePath);
         //printf("in if\n");
 
         char buffer[LINESIZE];
@@ -382,7 +382,7 @@ char* send_file_to_servers(char* ip, char* port, char* filePath, char* filename)
         }
 
         write(sock , sendMessage , strlen(sendMessage));
-        printf("sent: |%s|\n", sendMessage);
+        //printf("sent: |%s|\n", sendMessage);
 
         fclose(fp);
     } else { //file was not able to be opened
